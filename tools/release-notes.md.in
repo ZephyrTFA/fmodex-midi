@@ -1,0 +1,20 @@
+> [!WARNING]
+> **Buyer beware.** fmodex-midi is built and tested against **FMOD Ex 4.32.1 (32-bit)** only, so it may not work with your application or FMOD version. Uninstalling puts your original `fmodex.dll` back. If it doesn't work, [open an issue](@ISSUES_URL@/new?template=compatibility.yml) with a link to the application.
+
+## Downloads
+
+| File | What it is |
+|---|---|
+| `fmodex-midi.ps1` | **One-click installer.** Copy it next to the application's `fmodex.dll`, close the application, then right-click → *Run with PowerShell*. It checks compatibility, installs, and can uninstall (`-Action uninstall`). |
+| `fmodex.dll` | The replacement DLL on its own, for manual installation (below). |
+| `fmodex-midi-@VERSION@-src.zip` | Source code for this release. |
+| `SHA256SUMS` | Checksums for the files above. |
+
+### Manual installation (`fmodex.dll`)
+
+1. Close the application.
+2. In its folder, rename the original `fmodex.dll` to **`fmodex_real.dll`**. The replacement forwards everything to it, so the original must stay there.
+3. Copy this release's `fmodex.dll` into the folder.
+4. Optional: create `fmodex-midi.ini` next to it ([example](https://github.com/ZephyrTFA/fmodex-midi/blob/@VERSION@/fmodex-midi.ini.example)). Without one, the defaults are KDMAPI (OmniMIDI) if installed, otherwise the Windows MIDI mapper.
+
+To undo it, delete `fmodex.dll` and rename `fmodex_real.dll` back to `fmodex.dll`.

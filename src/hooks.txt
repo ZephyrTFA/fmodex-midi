@@ -1,0 +1,34 @@
+# Exports implemented by our proxy (everything else forwards to fmodex_real.dll).
+# One MSVC-mangled name per line. tools/gen_def.py maps
+#   ?method@Class@FMOD@@...  ->  C symbol hk_Class_method
+# so each name here needs a matching __stdcall function in src/hooks.c.
+
+?init@System@FMOD@@QAG?AW4FMOD_RESULT@@HIPAX@Z
+?update@System@FMOD@@QAG?AW4FMOD_RESULT@@XZ
+?release@System@FMOD@@QAG?AW4FMOD_RESULT@@XZ
+?createSound@System@FMOD@@QAG?AW4FMOD_RESULT@@PBDIPAUFMOD_CREATESOUNDEXINFO@@PAPAVSound@2@@Z
+?getMasterChannelGroup@System@FMOD@@QAG?AW4FMOD_RESULT@@PAPAVChannelGroup@2@@Z
+?playSound@System@FMOD@@QAG?AW4FMOD_RESULT@@W4FMOD_CHANNELINDEX@@PAVSound@2@_NPAPAVChannel@2@@Z
+
+?release@Sound@FMOD@@QAG?AW4FMOD_RESULT@@XZ
+?getLength@Sound@FMOD@@QAG?AW4FMOD_RESULT@@PAII@Z
+
+?stop@Channel@FMOD@@QAG?AW4FMOD_RESULT@@XZ
+?setPaused@Channel@FMOD@@QAG?AW4FMOD_RESULT@@_N@Z
+?setVolume@Channel@FMOD@@QAG?AW4FMOD_RESULT@@M@Z
+?setFrequency@Channel@FMOD@@QAG?AW4FMOD_RESULT@@M@Z
+?setPan@Channel@FMOD@@QAG?AW4FMOD_RESULT@@M@Z
+?setMute@Channel@FMOD@@QAG?AW4FMOD_RESULT@@_N@Z
+?setPriority@Channel@FMOD@@QAG?AW4FMOD_RESULT@@H@Z
+?setPosition@Channel@FMOD@@QAG?AW4FMOD_RESULT@@II@Z
+?getPosition@Channel@FMOD@@QAG?AW4FMOD_RESULT@@PAII@Z
+?setMode@Channel@FMOD@@QAG?AW4FMOD_RESULT@@I@Z
+?setCallback@Channel@FMOD@@QAG?AW4FMOD_RESULT@@P6G?AW43@PAUFMOD_CHANNEL@@W4FMOD_CHANNEL_CALLBACKTYPE@@PAX2@Z@Z
+?set3DAttributes@Channel@FMOD@@QAG?AW4FMOD_RESULT@@PBUFMOD_VECTOR@@0@Z
+?isPlaying@Channel@FMOD@@QAG?AW4FMOD_RESULT@@PA_N@Z
+
+?setVolume@ChannelGroup@FMOD@@QAG?AW4FMOD_RESULT@@M@Z
+?setPitch@ChannelGroup@FMOD@@QAG?AW4FMOD_RESULT@@M@Z
+?setPaused@ChannelGroup@FMOD@@QAG?AW4FMOD_RESULT@@_N@Z
+?setMute@ChannelGroup@FMOD@@QAG?AW4FMOD_RESULT@@_N@Z
+?stop@ChannelGroup@FMOD@@QAG?AW4FMOD_RESULT@@XZ

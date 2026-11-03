@@ -1,0 +1,49 @@
+name: Doesn't work with my application
+description: fmodex-midi didn't install or didn't work with an application or FMOD version
+labels: [compatibility]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        fmodex-midi is tested with FMOD Ex 4.32.1 (32-bit) only, so other applications or FMOD versions may not work. Thanks for reporting! You can put your original `fmodex.dll` back with `fmodex-midi.ps1 -Action uninstall`.
+  - type: input
+    id: app
+    attributes:
+      label: Application
+      description: Name and version of the application.
+    validations:
+      required: true
+  - type: input
+    id: link
+    attributes:
+      label: Link to the application
+      description: Download, store or project page, so it can be reproduced.
+      placeholder: https://
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: Installer status output
+      description: Output of `powershell -ExecutionPolicy Bypass -File fmodex-midi.ps1 -Action status -Path "<app folder>" -NoPause`. It includes your fmodex.dll version and the compatibility verdict.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, what happened instead (no sound, crash, wrong tempo, stuck notes, ...).
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: MIDI output
+      options: [OmniMIDI (KDMAPI), Windows MIDI mapper / winmm, Don't know]
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Set `log_file=fmodex-midi.log` (and optionally `log_level=trace`) in fmodex-midi.ini, reproduce, then attach or paste fmodex-midi.log.
+      render: text

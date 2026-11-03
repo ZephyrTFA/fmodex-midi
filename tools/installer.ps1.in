@@ -1,0 +1,261 @@
+<#
+fmodex-midi @VERSION@: a drop-in replacement for an application's fmodex.dll
+(FMOD Ex, 32-bit) that sends its MIDI playback to a real MIDI synth: OmniMIDI
+over KDMAPI if installed, otherwise the Windows MIDI mapper (winmm).
+Everything else is passed straight through to the original FMOD.
+Self-contained: the replacement fmodex.dll is embedded below.
+
+BUYER BEWARE: built and tested against FMOD Ex 4.32.1 only. It may not work
+with your application or your FMOD version. If it doesn't, uninstall it and
+open an issue (with a link to the application) at:
+  @ISSUES_URL@
+
+One click: copy this script next to the application's fmodex.dll, close the
+application, then right-click it -> "Run with PowerShell".
+
+From a PowerShell prompt:
+  powershell -ExecutionPolicy Bypass -File fmodex-midi.ps1 [-Path <folder with fmodex.dll>]
+  ... -Action status | uninstall
+  ... -Force         install even if the original fmodex.dll looks incompatible
+  ... -NoPause       don't wait for Enter at the end
+
+Install renames the original fmodex.dll to fmodex_real.dll and puts the
+replacement in its place; uninstall puts the original back. Settings live in
+fmodex-midi.ini next to it. If an application update restores its own
+fmodex.dll, just run the installer again.
+#>
+[CmdletBinding()]
+param(
+    [ValidateSet("install", "uninstall", "status")][string]$Action = "install",
+    [string[]]$Path,
+    [switch]$Force,
+    [switch]$NoPause   # don't wait for Enter at the end (scripted use)
+)
+$ErrorActionPreference = "Stop"
+# Without -Path this was most likely double-clicked / "Run with PowerShell":
+# keep the window open long enough to read the result.
+$Pause = -not $Path -and -not $NoPause -and $Host.Name -eq "ConsoleHost"
+
+$ProxyVersion = "@VERSION@"
+$ProxySha256 = "@PROXY_SHA256@"
+$IssuesUrl = "@ISSUES_URL@"
+
+@DATA@
+
+function Get-Sha256([string]$file) { (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLower() }
+
+function Show-IssueHint {
+    Write-Host ""
+    Write-Host "  If it doesn't work with your application, uninstall (-Action uninstall) and"
+    Write-Host "  open an issue at $IssuesUrl"
+    Write-Host "  with a link to the application, the fmodex.dll version shown above and"
+    Write-Host "  what happened (set log_file=fmodex-midi.log in fmodex-midi.ini and attach it)."
+}
+
+# ---- PE export table ------------------------------------------------------
+
+# Returns @{ Machine; Names; Implemented }: every exported name, and the
+# subset that is implemented rather than forwarded to another DLL.
+function Read-PeExports([byte[]]$b) {
+    $u16 = { param($o) [BitConverter]::ToUInt16($b, $o) }
+    $u32 = { param($o) [BitConverter]::ToUInt32($b, $o) }
+    if ($b.Length -lt 0x40 -or $b[0] -ne 0x4D -or $b[1] -ne 0x5A) { throw "not a Windows DLL" }
+    $pe = [int](& $u32 0x3C)
+    if ($pe + 0x78 -gt $b.Length -or (& $u32 $pe) -ne 0x00004550) { throw "not a PE file" }
+    $machine = & $u16 ($pe + 4)
+    $nsec = & $u16 ($pe + 6)
+    $optSize = & $u16 ($pe + 20)
+    $opt = $pe + 24
+    if ((& $u16 $opt) -ne 0x10B) { return @{ Machine = $machine; Names = @(); Implemented = @() } }  # not PE32
+    $expRva = & $u32 ($opt + 96)
+    $expSize = & $u32 ($opt + 100)
+    $secs = $opt + $optSize
+    $toOff = {
+        param($rva)
+        for ($i = 0; $i -lt $nsec; $i++) {
+            $s = $secs + 40 * $i
+            $va = & $u32 ($s + 12); $vs = [Math]::Max((& $u32 ($s + 8)), (& $u32 ($s + 16)))
+            if ($rva -ge $va -and $rva -lt $va + $vs) { return [int]($rva - $va + (& $u32 ($s + 20))) }
+        }
+        throw "bad RVA in export table"
+    }
+    $cstr = {
+        param($o)
+        $e = $o; while ($e -lt $b.Length -and $b[$e] -ne 0) { $e++ }
+        [Text.Encoding]::ASCII.GetString($b, $o, $e - $o)
+    }
+    $names = New-Object System.Collections.Generic.List[string]
+    $impl = New-Object System.Collections.Generic.List[string]
+    if ($expRva -ne 0) {
+        $ed = & $toOff $expRva
+        $nNames = & $u32 ($ed + 24)
+        $funcs = & $toOff (& $u32 ($ed + 28))
+        $namePtrs = & $toOff (& $u32 ($ed + 32))
+        $ords = & $toOff (& $u32 ($ed + 36))
+        for ($i = 0; $i -lt $nNames; $i++) {
+            $n = & $cstr (& $toOff (& $u32 ($namePtrs + 4 * $i)))
+            $names.Add($n)
+            $fRva = & $u32 ($funcs + 4 * (& $u16 ($ords + 2 * $i)))
+            if ($fRva -lt $expRva -or $fRva -ge $expRva + $expSize) { $impl.Add($n) }
+        }
+    }
+    @{ Machine = $machine; Names = $names; Implemented = $impl }
+}
+
+$script:ProxyExports = $null
+function Get-ProxyExports {
+    if (-not $script:ProxyExports) {
+        $script:ProxyExports = Read-PeExports ([Convert]::FromBase64String(($ProxyB64 -replace '\s', '')))
+    }
+    $script:ProxyExports
+}
+
+# Can the embedded replacement stand in for this original fmodex.dll?
+# Returns @{ Ok; Exact; Text }.
+function Test-Compat([string]$orig) {
+    $o = Read-PeExports ([IO.File]::ReadAllBytes($orig))
+    $ver = [Diagnostics.FileVersionInfo]::GetVersionInfo($orig).FileVersion
+    $what = "FMOD $ver"
+    if ($o.Machine -ne 0x14C) {
+        return @{ Ok = $false; Exact = $false; Text = "$what is not a 32-bit (x86) DLL" }
+    }
+    $p = Get-ProxyExports
+    $pn = New-Object 'System.Collections.Generic.HashSet[string]' (, [string[]]$p.Names)
+    $on = New-Object 'System.Collections.Generic.HashSet[string]' (, [string[]]$o.Names)
+    # Exports the application might import that we don't provide: it could fail to start.
+    $missing = @($o.Names | Where-Object { -not $pn.Contains($_) })
+    # Functions we intercept that this FMOD doesn't have: MIDI handling can't work.
+    $noHook = @($p.Implemented | Where-Object { -not $on.Contains($_) })
+    if ($missing.Count -or $noHook.Count) {
+        $t = "$what looks incompatible"
+        if ($missing.Count) { $t += "; $($missing.Count) of its exports aren't provided (e.g. $($missing[0]))" }
+        if ($noHook.Count) { $t += "; it lacks $($noHook.Count) hooked function(s) (e.g. $($noHook[0]))" }
+        return @{ Ok = $false; Exact = $false; Text = $t }
+    }
+    if ($on.Count -eq $pn.Count) {
+        return @{ Ok = $true; Exact = $true; Text = "$what, exports match the tested FMOD Ex 4.32.1" }
+    }
+    @{ Ok = $true; Exact = $false; Text = "$what, compatible exports but not the tested FMOD Ex 4.32.1 (untested, buyer beware)" }
+}
+
+# ---- actions -------------------------------------------------------------
+
+# Default target: the folder this script sits in, else the current folder.
+function Find-Targets {
+    $c = @()
+    if ($PSScriptRoot) { $c += $PSScriptRoot }
+    $c += (Get-Location).Path
+    $c | Where-Object { Test-Path -LiteralPath (Join-Path $_ "fmodex.dll") } | Select-Object -First 1
+}
+
+function Get-State([string]$dir) {
+    $dll = Join-Path $dir "fmodex.dll"
+    $real = Join-Path $dir "fmodex_real.dll"
+    if (-not (Test-Path -LiteralPath $dll)) { return "no fmodex.dll" }
+    $mine = (Get-Sha256 $dll) -eq $ProxySha256
+    if (Test-Path -LiteralPath $real) {
+        $v = if ($mine) { $ProxyVersion } else { "other version" }
+        return "installed ($v); original: " + (Test-Compat $real).Text
+    }
+    if ($mine) { return "fmodex-midi is present but fmodex_real.dll is missing (broken install)" }
+    return "not installed; original: " + (Test-Compat $dll).Text
+}
+
+# A DLL that some process has loaded can't be opened for writing.
+function Assert-NotInUse([string]$dir) {
+    foreach ($name in "fmodex.dll", "fmodex_real.dll") {
+        $f = Join-Path $dir $name
+        if (-not (Test-Path -LiteralPath $f)) { continue }
+        try {
+            $s = [IO.File]::Open($f, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+            $s.Close()
+        } catch [IO.IOException] {
+            throw "$name is in use; close the application using it first."
+        }
+    }
+}
+
+function Write-Atomic([string]$dest, [byte[]]$bytes) {
+    $tmp = "$dest.tmp"
+    [IO.File]::WriteAllBytes($tmp, $bytes)
+    Move-Item -LiteralPath $tmp -Destination $dest -Force
+}
+
+function Install-Into([string]$dir, [byte[]]$proxy, [string]$ini) {
+    $dll = Join-Path $dir "fmodex.dll"
+    $real = Join-Path $dir "fmodex_real.dll"
+    Assert-NotInUse $dir
+    $orig = if (Test-Path -LiteralPath $real) { $real } else { $dll }
+    if ($orig -eq $dll -and (Get-Sha256 $dll) -eq $ProxySha256) {
+        throw "fmodex.dll is already fmodex-midi but fmodex_real.dll is missing; restore the original fmodex.dll first."
+    }
+    $c = Test-Compat $orig
+    Write-Host ("{0}: {1}" -f $dir, $c.Text)
+    if (-not $c.Ok -and -not $Force) {
+        throw "not installing. Use -Force to try anyway (at your own risk)."
+    }
+    if ($orig -eq $real) {
+        if ((Get-Sha256 $dll) -eq $ProxySha256) { return "already installed" }
+        Write-Atomic $dll $proxy
+        $result = "updated"
+    } else {
+        Move-Item -LiteralPath $dll -Destination $real
+        try { Write-Atomic $dll $proxy }
+        catch { Move-Item -LiteralPath $real -Destination $dll -Force; throw }
+        $result = "installed"
+    }
+    $iniPath = Join-Path $dir "fmodex-midi.ini"
+    if (-not (Test-Path -LiteralPath $iniPath)) { [IO.File]::WriteAllText($iniPath, $ini) }
+    if (-not $c.Exact) { $result += " (UNTESTED FMOD version: buyer beware)" }
+    return $result
+}
+
+function Uninstall-From([string]$dir) {
+    $dll = Join-Path $dir "fmodex.dll"
+    $real = Join-Path $dir "fmodex_real.dll"
+    if (-not (Test-Path -LiteralPath $real)) { return "not installed" }
+    Assert-NotInUse $dir
+    Move-Item -LiteralPath $real -Destination $dll -Force
+    return "uninstalled (fmodex-midi.ini left in place)"
+}
+
+# ---- main ------------------------------------------------------------------
+
+Write-Host "fmodex-midi ${ProxyVersion}: buyer beware, tested with FMOD Ex 4.32.1 only."
+$dirs = if ($Path) { $Path | ForEach-Object { $_.TrimEnd('\') } } else { @(Find-Targets) }
+if (-not $dirs) {
+    Write-Host "No fmodex.dll here. Copy this script next to the application's fmodex.dll, or pass -Path <folder>."
+    if ($Pause) { Read-Host "Press Enter to close" | Out-Null }
+    exit 1
+}
+
+$proxy = $null; $ini = $null
+if ($Action -eq "install") {
+    $proxy = [Convert]::FromBase64String(($ProxyB64 -replace '\s', ''))
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $got = -join ($sha.ComputeHash($proxy) | ForEach-Object { $_.ToString("x2") })
+    if ($got -ne $ProxySha256) { throw "embedded fmodex.dll is corrupt (sha256 $got)" }
+    $ini = $DefaultIni
+}
+
+$failed = 0
+foreach ($dir in $dirs) {
+    try {
+        if (-not (Test-Path -LiteralPath (Join-Path $dir "fmodex.dll"))) { throw "no fmodex.dll here" }
+        $r = switch ($Action) {
+            "status"    { Get-State $dir }
+            "install"   { Install-Into $dir $proxy $ini }
+            "uninstall" { Uninstall-From $dir }
+        }
+        Write-Host ("{0}: {1}" -f $dir, $r)
+    } catch [UnauthorizedAccessException] {
+        $failed++
+        Write-Host ("{0}: access denied; run this from an elevated (Administrator) PowerShell." -f $dir)
+    } catch {
+        $failed++
+        Write-Host ("{0}: {1}" -f $dir, $_.Exception.Message)
+    }
+}
+if ($Action -ne "uninstall") { Show-IssueHint }
+if ($Pause) { Read-Host "Press Enter to close" | Out-Null }
+exit $failed

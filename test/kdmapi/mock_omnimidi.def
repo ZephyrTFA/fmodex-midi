@@ -1,0 +1,10 @@
+LIBRARY OmniMIDI.dll
+EXPORTS
+IsKDMAPIAvailable=IsKDMAPIAvailable@0
+InitializeKDMAPIStream=InitializeKDMAPIStream@0
+TerminateKDMAPIStream=TerminateKDMAPIStream@0
+ResetKDMAPIStream=ResetKDMAPIStream@0
+SendDirectData=SendDirectData@4
+SendDirectLongData=SendDirectLongData@8
+PrepareLongData=PrepareLongData@8
+UnprepareLongData=UnprepareLongData@8

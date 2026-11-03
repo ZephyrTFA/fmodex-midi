@@ -1,0 +1,17 @@
+; fmodex-midi settings. Lives next to the replacement fmodex.dll in the
+; application's folder. Every key is optional.
+[midi]
+; 1 = send MIDI to a real synth, 0 = stock FMOD playback
+enabled=1
+; auto (OmniMIDI/KDMAPI if installed, else Windows MIDI) | kdmapi | winmm | log | off
+backend=auto
+; winmm output: mapper | device index | part of the device name
+winmm_device=mapper
+; gm (cc * sqrt(volume)) | linear (cc * volume)
+volume_curve=gm
+; diagnostic log, empty = off (relative paths are relative to this folder)
+log_file=
+; info | trace (trace logs every hooked FMOD call)
+log_level=info
+; output file for backend=log (testing)
+event_log=

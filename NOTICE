@@ -1,0 +1,13 @@
+Third-party names in this repository
+=====================================
+
+The MIT license in LICENSE applies to this project's own work. This project
+is not affiliated with or endorsed by Firelight Technologies or the OmniMIDI
+authors.
+
+- FMOD and FMOD Ex are trademarks of Firelight Technologies Pty Ltd.
+  references/fmodex-4.32.1/exports.txt lists the function names exported by
+  fmodex.dll 4.32.1; it is interoperability data needed to build a compatible
+  replacement, and no FMOD code or SDK files are included.
+- OmniMIDI and KDMAPI are by Keppy's Software / the OmniMIDI authors; only
+  their public KDMAPI function names are used.

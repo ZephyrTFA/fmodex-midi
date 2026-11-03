@@ -1,0 +1,80 @@
+name: build
+
+# Builds the self-contained installer (build/fmodex-midi.ps1) with the same
+# Nix devShell used locally, after the export checks and native tests.
+# Pushing a v* tag also publishes it as a GitHub Release asset.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # `git describe` stamps the installer version
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Export checks (export set, forwarders, imports, stdcall sizes)
+        run: nix develop --command make check
+
+      - name: Native tests (parser vs mido, player, fuzz smoke)
+        run: nix develop --command make test
+
+      - name: Build release assets (source zip, fmodex.dll, installer, SHA256SUMS)
+        env:
+          ISSUES_URL: ${{ github.server_url }}/${{ github.repository }}/issues
+        run: |
+          nix develop --command make release ISSUES_URL="$ISSUES_URL"
+          cat build/release/SHA256SUMS
+
+      - name: Installer tests (export-table verdicts, install/uninstall)
+        run: nix develop --command test/installer/run.sh
+
+      - name: Check the installer parses as PowerShell
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+              "$PWD/build/release/fmodex-midi.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors | ForEach-Object { Write-Error $_.ToString() }; exit 1 }
+          Write-Host "fmodex-midi.ps1 parses cleanly"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fmodex-midi-release
+          path: build/release/
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: installer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: fmodex-midi-release
+          path: release
+      - uses: softprops/action-gh-release@v3
+        with:
+          body_path: release/NOTES.md
+          generate_release_notes: true
+          files: |
+            release/fmodex-midi.ps1
+            release/fmodex.dll
+            release/fmodex-midi-*-src.zip
+            release/SHA256SUMS
